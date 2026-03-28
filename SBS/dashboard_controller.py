@@ -22,6 +22,7 @@ Design rules
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 
@@ -76,9 +77,11 @@ class ShowcaseDashboard:
         st.set_page_config() MUST be the first Streamlit call in the
         script; placing it here guarantees that before run() does anything.
         """
+        _icon_path = os.path.join("assets", "icon.png")
+        _icon = Image.open(_icon_path) if os.path.exists(_icon_path) else "DNA"
         st.set_page_config(
             page_title="JOSEPHS | Evolutionary Image Reconstruction",
-            page_icon="DNA",
+            page_icon=_icon,
             layout="wide",
         )
 

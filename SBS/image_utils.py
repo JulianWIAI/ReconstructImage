@@ -106,39 +106,61 @@ def list_asset_images(assets_dir: str) -> list:
 
 def compute_edge_map(target_rgb: np.ndarray) -> np.ndarray:
     """
-    Compute a normalised (H, W) float32 edge-importance map via Sobel.
+    Compute a normalised (H, W) float32 edge-importance map via Sobel filtering.
 
-    High values mark pixels at colour boundaries (e.g. the red/blue ring
-    edges of the JOSEPHS logo).  Used for:
-      1. Weighted MSE fitness (boundary pixels count more).
-      2. Edge-biased vertex initialisation in the EA.
+    The Sobel operator approximates the image gradient magnitude — a measure
+    of how rapidly pixel intensity changes in each direction.  Pixels at colour
+    boundaries (e.g. the sharp red-to-white ring edge of the JOSEPHS logo) have
+    a high gradient magnitude; flat interior regions have a gradient near zero.
 
-    Pure NumPy — no scipy/skimage dependency required.
+    The resulting map is used for two purposes:
+      1. Weighted MSE fitness: boundary pixels penalise the EA up to 4× more,
+         forcing triangle placement to align with sharp edges first.
+      2. Edge-biased vertex initialisation: newly created or burst-regenerated
+         genomes have some vertices snapped near high-gradient pixels, injecting
+         domain knowledge about where the important features are located.
+
+    Implementation: pure NumPy separable 1D passes approximate the full 3×3
+    Sobel kernel without scipy or skimage — keeping the dependency list minimal.
+
+    Parameters
+    ----------
+    target_rgb : (H, W, 3) uint8
+
+    Returns
+    -------
+    np.ndarray  (H, W) float32, normalised to [0, 1].
     """
-    # Convert to float32 luminance  [0, 1]
+    # Convert to float32 luminance [0, 1] using standard ITU-R BT.601 weights.
+    # A single-channel luminance image is sufficient — the Sobel gradient detects
+    # brightness changes which correspond to colour boundary edges.
     lum = (
         0.299 * target_rgb[:, :, 0]
         + 0.587 * target_rgb[:, :, 1]
         + 0.114 * target_rgb[:, :, 2]
     ).astype(np.float32) / 255.0
 
-    # Horizontal Sobel  (3×3, approximated with 1D separable ops)
-    # Gy = [[-1,-2,-1],[0,0,0],[1,2,1]] applied via two 1D passes
-    smooth_h = lum[:, :-2] + 2 * lum[:, 1:-1] + lum[:, 2:]   # horizontal blur row
-    gx = smooth_h[2:, :] - smooth_h[:-2, :]                   # vertical diff
+    # Sobel operator decomposed into separable 1D passes (more efficient than
+    # a 2D convolution for a 3×3 kernel):
+    #   Gx ≈ [-1,0,1] (horizontal) convolved with [1,2,1]ᵀ (vertical blur)
+    #   Gy ≈ [1,2,1]  (vertical)  convolved with [-1,0,1]ᵀ (horizontal blur)
+    # The blurring step suppresses noise before differencing, which is why
+    # Sobel outperforms a plain finite-difference gradient on real images.
+    smooth_h = lum[:, :-2] + 2 * lum[:, 1:-1] + lum[:, 2:]   # row-wise blur
+    gx = smooth_h[2:, :] - smooth_h[:-2, :]                   # vertical diff → Gx
 
-    smooth_v = lum[:-2, :] + 2 * lum[1:-1, :] + lum[2:, :]   # vertical blur col
-    gy = smooth_v[:, 2:] - smooth_v[:, :-2]                   # horizontal diff
+    smooth_v = lum[:-2, :] + 2 * lum[1:-1, :] + lum[2:, :]   # col-wise blur
+    gy = smooth_v[:, 2:] - smooth_v[:, :-2]                   # horizontal diff → Gy
 
-    # Pad back to original size
+    # Accumulate gradient magnitudes back into a full-size canvas.
+    # Using |Gx| + |Gy| as an L1 approximation to √(Gx² + Gy²) avoids a sqrt
+    # while preserving the relative ordering of edge strength — sufficient here.
     h, w = lum.shape
     grad = np.zeros((h, w), dtype=np.float32)
-    # gx covers rows [1:-1], cols [0 : w-2]
     grad[1:-1, 0 : w - 2] += np.abs(gx)
-    # gy covers rows [0 : h-2], cols [1:-1]
     grad[0 : h - 2, 1:-1] += np.abs(gy)
 
-    # Normalise to [0, 1]
+    # Normalise to [0, 1] so the weight map is resolution-independent.
     max_val = grad.max()
     if max_val > 1e-8:
         grad /= max_val
@@ -247,20 +269,28 @@ def genome_to_pil(genome: "Genome") -> Image.Image:
 
 def compute_fitness(rendered: np.ndarray, target_f32: np.ndarray) -> float:
     """
-    Vectorised Mean Squared Error.
+    Unweighted Mean Squared Error between a rendered genome and the target image.
+
+    MSE = (1 / (H × W × 3)) × Σ (rendered_i − target_i)²
+
+    Squaring the per-pixel differences penalises large errors more than small
+    ones (a pixel that is 20 units off contributes 4× as much as one that is
+    10 units off), which encourages the EA to eliminate gross mismatches before
+    refining subtle ones.  The theoretical maximum for uint8 RGB is 255² = 65025.
 
     Parameters
     ----------
     rendered   : (H, W, 3) uint8
-    target_f32 : (H, W, 3) float32  — pre-cast for speed (cast once, reuse many times)
+    target_f32 : (H, W, 3) float32  — pre-cast by the caller to avoid
+                  repeated type conversion in the hot evaluation loop.
 
     Returns
     -------
     float  MSE in [0, 65025]; lower is better.
     """
-    # Cast once per call — target_f32 is pre-cast by the caller
+    # Cast rendered once; target_f32 is pre-cast by the caller (cast once,
+    # reuse across the entire population evaluation — significant speed saving).
     diff = rendered.astype(np.float32) - target_f32
-    # Vectorised: diff**2 then mean — zero Python pixel loops
     return float(np.mean(diff * diff))
 
 
@@ -270,27 +300,48 @@ def compute_fitness_weighted(
     edge_weights: np.ndarray,
 ) -> float:
     """
-    Edge-weighted MSE.
+    Edge-weighted Mean Squared Error — the primary fitness function used by the EA.
 
-    Pixels at colour boundaries (high edge_weights) contribute up to
-    4× more to the fitness score.  This forces the EA to prioritise
-    reconstructing the sharp rings of the JOSEPHS logo before worrying
-    about flat interior regions.
+    Formula
+    -------
+    weighted_MSE = Σ [ diff²(x,y,c) × w(x,y) ]  /  [ Σ w(x,y) × 3 ]
+
+    where  w(x,y) = 1 + 3 × edge_map(x,y)
+
+    Why edge weighting?
+    -------------------
+    A plain MSE treats every pixel equally: a flat background patch and a
+    sharp ring edge contribute the same amount to the loss.  This causes the
+    EA to waste many generations perfecting large, low-frequency areas while
+    ignoring the fine edges that humans perceive as the most defining feature
+    of the JOSEPHS logo.
+
+    The weight map w(x,y) linearly amplifies the contribution of boundary
+    pixels: an interior pixel (edge_map ≈ 0) has weight 1×, while a pixel
+    exactly on a colour boundary (edge_map = 1) has weight 1 + 3 = 4×.
+    This 4× penalty for mis-reconstructed edge pixels forces the genetic
+    algorithm to prioritise triangle placement along colour boundaries —
+    the rings — before refining the flat-colour interior regions.
+
+    The denominator Σ w × 3 normalises the result so it remains on a
+    comparable scale to unweighted MSE and does not explode as image size grows.
 
     Parameters
     ----------
     rendered      : (H, W, 3) uint8
     target_f32    : (H, W, 3) float32
-    edge_weights  : (H, W)    float32, normalised [0, 1]
+    edge_weights  : (H, W)    float32 in [0, 1], produced by compute_edge_map()
 
     Returns
     -------
-    float  weighted MSE; lower is better.
+    float  weighted MSE; lower is better; comparable scale to plain MSE.
     """
     diff_sq = (rendered.astype(np.float32) - target_f32) ** 2  # (H, W, 3)
 
-    # Expand edge weights to (H, W, 1) for broadcasting over 3 channels
+    # Expand edge weights from (H, W) to (H, W, 1) so NumPy broadcasts the
+    # same spatial weight across all three colour channels simultaneously.
     w = (1.0 + 3.0 * edge_weights)[:, :, np.newaxis]           # (H, W, 1)
 
-    # Normalised weighted mean
+    # Normalised weighted sum — dividing by Σ w × 3 keeps the output in the
+    # same range as plain MSE, making the fitness history chart interpretable.
     return float(np.sum(diff_sq * w) / (np.sum(w) * 3.0))

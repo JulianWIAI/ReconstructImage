@@ -84,9 +84,28 @@ class Genome:
         img_height: int = 128,
         dna_matrix: Optional[np.ndarray] = None,
     ):
+        """
+        Initialise a Genome, either from a pre-built DNA matrix or randomly.
+
+        Parameters
+        ----------
+        num_triangles : int
+            Number of semi-transparent triangles in this individual.
+            More triangles → higher representational capacity, slower evaluation.
+        img_width, img_height : int
+            Canvas dimensions used to bound vertex coordinates and to scale
+            mutation deltas (positions are clamped to [0, w-1] / [0, h-1]).
+        dna_matrix : (N, 10) float32 array, optional
+            If provided, this genome inherits the given DNA directly (used by
+            crossover and mutate to return new children without a Python loop).
+            If None, a uniformly random DNA is generated via _random_dna().
+        """
         self._num_triangles: int = num_triangles
         self._img_width: int = img_width
         self._img_height: int = img_height
+        # Initialise fitness to +∞ so that any evaluated genome is immediately
+        # "better" than an unevaluated one — a safe sentinel for min() comparisons
+        # in tournament selection and elite sorting.
         self._fitness: float = float("inf")
 
         if dna_matrix is not None:
@@ -99,7 +118,13 @@ class Genome:
     # ------------------------------------------------------------------
 
     def _random_dna(self) -> np.ndarray:
-        """Create a random (N, 10) DNA matrix."""
+        """
+        Create a fully random (N, 10) DNA matrix for population initialisation.
+
+        Returns
+        -------
+        np.ndarray  shape (N, 10), dtype float32
+        """
         n = self._num_triangles
         w, h = self._img_width, self._img_height
         dna = np.empty((n, 10), dtype=np.float32)
@@ -110,7 +135,11 @@ class Genome:
         dna[:, _COL_Y] = np.random.randint(0, h, (n, 3)).astype(np.float32)
         # RGB channels          (columns 6, 7, 8)
         dna[:, _COL_RGB] = np.random.randint(0, 256, (n, 3)).astype(np.float32)
-        # Alpha                 (column 9)
+        # Alpha bounds [0.10, 0.90]: fully transparent (0) triangles contribute
+        # nothing and waste representational capacity; fully opaque (1) triangles
+        # block all triangles beneath them, preventing layered colour blending.
+        # Restricting to [0.10, 0.90] keeps every triangle visible and allows
+        # the blended "watercolour" effect that enables fine colour gradients.
         dna[:, _COL_A] = np.random.uniform(0.10, 0.90, n).astype(np.float32)
 
         return dna
@@ -172,26 +201,54 @@ class Genome:
 
     def mutate(self, mutation_rate: float, step_size: float = 1.0) -> "Genome":
         """
-        Vectorized mutation — ONE NumPy call for all N × 10 genes.
+        Vectorised Gaussian mutation with per-gene Bernoulli masking.
 
-        step_size > 1.0 produces 'catastrophic' large jumps used for
-        stagnation breaking.
+        Each of the N × 10 genes is independently mutated with probability
+        `mutation_rate`.  When a gene is selected, a Gaussian perturbation
+        (mean=0, std=scale) is added rather than a uniform random replacement.
+        Gaussian noise is preferred because:
+          - Small perturbations near the current value are most likely,
+            preserving good features while allowing fine refinement.
+          - Rare large perturbations provide enough exploration to escape
+            shallow local optima without destroying the genome structure.
 
-        Returns a new Genome; does NOT modify self.
+        Parameters
+        ----------
+        mutation_rate : float
+            Per-gene probability of mutation in [0, 1].
+            Typical operating range: 0.01–0.10.  The engine raises this to
+            ~0.30 during a catastrophic burst to escape stagnation.
+        step_size : float
+            Multiplier on the base delta scale. Values > 1 produce large
+            "catastrophic" jumps; the engine uses 2.5–3.0 during bursts.
+
+        Returns
+        -------
+        Genome  A new child genome; self is never modified.
         """
         w, h = self._img_width, self._img_height
         n = self._num_triangles
 
-        # Build per-column absolute delta scales
+        # Build per-column absolute delta scales.
+        # _DELTA_SCALE_TEMPLATE encodes domain knowledge:
+        #   - 0.15 × dimension for vertex positions ≈ 15 % of image width/height
+        #     per standard deviation, giving meaningful spatial jumps.
+        #   - 40.0 for RGB channels because colour space is [0, 255]; a σ of 40
+        #     shifts hue noticeably but rarely flips it completely.
+        #   - 0.15 for alpha keeps blending within a perceptible but not
+        #     catastrophic range each step.
         scale = _DELTA_SCALE_TEMPLATE.copy()
-        scale[_COL_X] *= w  # convert fraction → pixels
+        scale[_COL_X] *= w  # convert fraction → pixels for this canvas
         scale[_COL_Y] *= h
-        scale *= step_size
+        scale *= step_size  # amplified during catastrophic burst
 
-        # Gaussian perturbations shaped (N, 10), scaled per column
+        # Sample all N × 10 Gaussian deltas in a single NumPy call — avoids
+        # any Python-level loop over triangles or genes.
         deltas = np.random.randn(n, 10).astype(np.float32) * scale[np.newaxis, :]
 
-        # Bernoulli gate: each gene mutates independently
+        # Bernoulli gate: each gene flips independently with P = mutation_rate.
+        # Multiplying by the float gate (0.0 or 1.0) is equivalent to masking
+        # but remains a single vectorised multiply — no Python branching.
         gate = (np.random.random((n, 10)) < mutation_rate).astype(np.float32)
 
         new_dna = self._dna + deltas * gate
@@ -202,10 +259,28 @@ class Genome:
 
     def crossover(self, other: "Genome") -> "Genome":
         """
-        Uniform crossover: for each triangle, randomly inherit from
-        either parent. Vectorized via boolean mask + np.where.
+        Uniform crossover at the triangle (gene) level.
+
+        For each of the N triangles, the child inherits the full 10-column
+        row from either self or other with equal probability (50/50).
+        Inheriting whole triangles — rather than mixing individual columns
+        within a triangle — preserves the positional/colour coherence of
+        each gene: a triangle's colour should stay paired with its vertices.
+
+        The mask shape (N, 1) broadcasts over all 10 columns via np.where,
+        making this a single vectorised operation with no Python loop.
+
+        Parameters
+        ----------
+        other : Genome  The second parent (chosen by tournament selection).
+
+        Returns
+        -------
+        Genome  A new child genome combining both parents' triangles.
         """
-        # mask shape (N, 1) → broadcasts to (N, 10)
+        # Coin-flip per triangle; (N, 1) broadcasts across the 10 DNA columns
+        # so each row is taken entirely from one parent, not gene-mixed within
+        # a triangle (which would scramble vertex–colour coherence).
         mask = (np.random.random(self._num_triangles) < 0.5)[:, np.newaxis]
         child_dna = np.where(mask, self._dna, other._dna)
         return Genome(self._num_triangles, self._img_width, self._img_height,
