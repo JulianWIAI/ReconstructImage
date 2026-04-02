@@ -1,5 +1,5 @@
 # Evolutionary Image Reconstruction
-### A Genetic Algorithm Showcase — JOSEPHS Exhibition
+### A Genetic Algorithm Showcase
 
 ![Showcase](placeholder_image.png)
 
@@ -49,7 +49,7 @@ ReconstructImage/
 ├── assets/                      # All static resources
 │   ├── icon.png                 # Browser tab favicon
 │   ├── BatmanLogoTest.png
-│   ├── JosephsLogo.png
+│   ├── Logo.png
 │   └── generate_assets.py
 └── SBS/                         # Core package
     ├── __init__.py
@@ -107,6 +107,14 @@ The dashboard will open automatically in your default browser at `http://localho
 
 ---
 
+## Screenshots
+
+![Goal reached — screenshot 1](screenshots/goal-1.png)
+
+![Goal reached — screenshot 2](screenshots/goal-2.png)
+
+---
+
 ## How It Works
 
 ```
@@ -135,7 +143,7 @@ The fitness landscape is guided by a **Sobel-computed edge map** pre-calculated 
 
 ## Development Process
 
-This scientific showcase was architected and developed for the JOSEPHS Exhibition. The underlying simulation logic, genetic algorithm tuning, and UI rendering were co-developed with Artificial Intelligence (Claude 3.5 Sonnet / Gemini) to demonstrate modern AI-assisted software engineering workflows.
+This scientific showcase was architected and developed as a demonstration project. The underlying simulation logic, genetic algorithm tuning, and UI rendering were co-developed with Artificial Intelligence (Claude 3.5 Sonnet / Gemini) to demonstrate modern AI-assisted software engineering workflows.
 
 ---
 

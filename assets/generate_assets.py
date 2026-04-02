@@ -5,7 +5,7 @@ Run this script ONCE to create the three pre-loaded target images.
     python assets/generate_assets.py
 
 Produces:
-    assets/josephs_logo.png     — colourful geometric logo
+    assets/logo.png             — colourful geometric logo
     assets/simple_shape.png     — minimal geometric target (easy)
     assets/complex_icon.png     — busy multi-colour target (hard)
 """
@@ -25,9 +25,9 @@ def _save(img: Image.Image, name: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 1. josephs_logo.png  — bold overlapping triangles forming a "J" motif
+# 1. logo.png  — bold overlapping triangles forming a "J" motif
 # ---------------------------------------------------------------------------
-def make_josephs_logo() -> Image.Image:
+def make_logo() -> Image.Image:
     img = Image.new("RGB", (SIZE, SIZE), (15, 15, 40))
     draw = ImageDraw.Draw(img, "RGBA")
 
@@ -95,7 +95,7 @@ def make_complex_icon() -> Image.Image:
 
 if __name__ == "__main__":
     print("Generating asset images …")
-    _save(make_josephs_logo(), "josephs_logo.png")
+    _save(make_logo(), "logo.png")
     _save(make_simple_shape(), "simple_shape.png")
     _save(make_complex_icon(), "complex_icon.png")
     print("Done.")

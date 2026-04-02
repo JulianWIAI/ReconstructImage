@@ -10,7 +10,7 @@ Performance design:
 
   - compute_fitness_weighted(): Vectorised MSE with an edge-importance
     weight map — boundary pixels contribute more to the loss, forcing
-    the EA to prioritise the JOSEPHS ring contours.
+    the EA to prioritise the target's ring contours.
 
   - compute_edge_map(): Sobel-based gradient magnitude in pure NumPy.
 
@@ -110,7 +110,7 @@ def compute_edge_map(target_rgb: np.ndarray) -> np.ndarray:
 
     The Sobel operator approximates the image gradient magnitude — a measure
     of how rapidly pixel intensity changes in each direction.  Pixels at colour
-    boundaries (e.g. the sharp red-to-white ring edge of the JOSEPHS logo) have
+    boundary pixels (e.g. the sharp red-to-white ring edge of the target image) have
     a high gradient magnitude; flat interior regions have a gradient near zero.
 
     The resulting map is used for two purposes:
@@ -314,7 +314,7 @@ def compute_fitness_weighted(
     sharp ring edge contribute the same amount to the loss.  This causes the
     EA to waste many generations perfecting large, low-frequency areas while
     ignoring the fine edges that humans perceive as the most defining feature
-    of the JOSEPHS logo.
+    of the target image.
 
     The weight map w(x,y) linearly amplifies the contribution of boundary
     pixels: an interior pixel (edge_map ≈ 0) has weight 1×, while a pixel

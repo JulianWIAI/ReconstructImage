@@ -22,8 +22,7 @@ main.py
 from SBS.dashboard_controller import ShowcaseDashboard
 
 """
-Scientific Showcase Project: Evolutionary Image Reconstruction
-Developed for the JOSEPHS Exhibition.
+Scientific Showcase Project: Evolutionary Image Reconstruction.
 Disclaimer: The architecture, genetic algorithm logic, and Streamlit UI of
 this project were co-developed with Artificial Intelligence (Claude 3.5
 Sonnet / Gemini) to demonstrate the capabilities of AI-assisted software

@@ -1,7 +1,7 @@
 """
 SBS/dashboard_controller.py
 Encapsulates the entire Streamlit UI, state management, and EA execution
-loop for the JOSEPHS Evolutionary Image Reconstruction exhibit.
+loop for the Evolutionary Image Reconstruction exhibit.
 
 Public interface
 ----------------
@@ -80,7 +80,7 @@ class ShowcaseDashboard:
         _icon_path = os.path.join("assets", "icon.png")
         _icon = Image.open(_icon_path) if os.path.exists(_icon_path) else "DNA"
         st.set_page_config(
-            page_title="JOSEPHS | Evolutionary Image Reconstruction",
+            page_title="Evolutionary Image Reconstruction",
             page_icon=_icon,
             layout="wide",
         )
@@ -159,6 +159,7 @@ class ShowcaseDashboard:
             "target_array_small": None,    # 128×128 for fitness
             "target_array_display": None,  # high-res for display
             "selected_image": default_image,
+            "loaded_target": default_image,
             "hp_mutation_rate": 0.04,
             "hp_num_triangles": 60,
             "hp_population_size": 25,
@@ -171,6 +172,7 @@ class ShowcaseDashboard:
         # Pre-load the default target once (subsequent reruns skip this)
         if st.session_state["target_array_small"] is None and default_image:
             self._load_target_images(default_image)
+            st.session_state["loaded_target"] = default_image
 
     def _load_target_images(self, image_name: str) -> None:
         """
@@ -197,8 +199,8 @@ class ShowcaseDashboard:
         private instance variables for use in _handle_controls().
         """
         with st.sidebar:
-            st.title("JOSEPHS EA Demo")
-            st.caption("Evolutionary Image Reconstruction")
+            st.title("Evolutionary Image Reconstruction")
+            st.caption("Evolutionary Image Reconstruction Demo")
             st.divider()
             st.header("Target Image")
 
@@ -219,6 +221,7 @@ class ShowcaseDashboard:
                 "Select target",
                 options=available,
                 index=default_idx,
+                key="selected_image",
                 help="The image the genetic algorithm will try to reconstruct.",
             )
 
@@ -304,9 +307,10 @@ class ShowcaseDashboard:
         Only self._start_btn sets running=True.
         """
         # --- React to target image change ----------------------------------
-        if self._selected_image != st.session_state["selected_image"]:
-            st.session_state["selected_image"] = self._selected_image
-            self._load_target_images(self._selected_image)
+        selected_image = st.session_state["selected_image"]
+        if selected_image != st.session_state.get("loaded_target", ""):
+            self._load_target_images(selected_image)
+            st.session_state["loaded_target"] = selected_image
             # Stop any running session; do NOT auto-start
             st.session_state["running"] = False
             st.session_state["optimizer"] = None
@@ -362,7 +366,7 @@ class ShowcaseDashboard:
         _refresh_display() and _run_evolution_loop() can update them by
         name without re-querying the DOM.
         """
-        st.title("Evolutionary Image Reconstruction - JOSEPHS Exhibit")
+        st.title("Evolutionary Image Reconstruction Showcase")
         st.caption(
             "A genetic algorithm reconstructs the target image using "
             "semi-transparent triangles. Watch MSE descend as the "

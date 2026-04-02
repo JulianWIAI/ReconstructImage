@@ -191,7 +191,7 @@ class ImageReconstructor(BaseEvolutionHandler):
     # snapped to a high-gradient (edge) pixel.  This directly injects
     # domain knowledge: colour-boundary pixels are the hardest features
     # for a random mutation to land on, so biasing towards them accelerates
-    # convergence on sharp ring edges (the JOSEPHS logo).
+    # convergence on sharp ring edges in the target image.
     _EDGE_INJECT_FRACTION: float = 0.4
 
     def __init__(
@@ -386,7 +386,7 @@ class ImageReconstructor(BaseEvolutionHandler):
              step-size mutations of the current elites.
           3. Injecting edge-biased vertices into a fraction of the
              regenerated genomes so they immediately orient toward
-             colour boundaries (the JOSEPHS rings).
+             colour boundaries.
         """
         self._current_mutation_rate = min(
             0.8,
